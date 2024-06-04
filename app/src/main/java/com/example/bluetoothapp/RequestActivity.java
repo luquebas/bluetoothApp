@@ -11,13 +11,17 @@ import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 
+import com.android.volley.AuthFailureError;
 import com.android.volley.Request;
 import com.android.volley.RequestQueue;
 import com.android.volley.Response;
 import com.android.volley.VolleyError;
+import com.android.volley.toolbox.JsonObjectRequest;
+import com.android.volley.toolbox.JsonRequest;
 import com.android.volley.toolbox.StringRequest;
 import com.android.volley.toolbox.Volley;
 
@@ -32,7 +36,7 @@ import java.util.UUID;
 
 public class RequestActivity extends AppCompatActivity {
 
-    private static final String HC06_ADDRESS = "00:00:00:00:00:00"; // Endereço MAC do HC-06
+    private static final String HC06_ADDRESS = "98:D3:21:F4:AF:24"; // Endereço MAC do HC-06
     private static final UUID HC06_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
 
     private BluetoothAdapter bluetoothAdapter;
@@ -40,8 +44,7 @@ public class RequestActivity extends AppCompatActivity {
     private OutputStream outputStream;
 
     private TextView responseTextView;
-    private Button sendBluetoothButton;
-    private String responseMessage, token;
+    private String responseMessage;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -49,40 +52,42 @@ public class RequestActivity extends AppCompatActivity {
         setContentView(R.layout.request_activity);
 
         responseTextView = findViewById(R.id.text_response);
-        sendBluetoothButton = findViewById(R.id.button_send_bluetooth);
 
         String qrCode = getIntent().getStringExtra("qrCode");
-        makeHttpRequest(qrCode);
 
-        sendBluetoothButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (responseMessage != null) {
-                    sendViaBluetooth(responseMessage);
-                } else {
-                    Toast.makeText(RequestActivity.this, "Nenhuma resposta para enviar", Toast.LENGTH_LONG).show();
-                }
-            }
-        });
+        try {
+            makeHttpRequest("https://apicarteirinha.onrender.com/api/v1/check", qrCode);
+        } catch (JSONException e) {
+            throw new RuntimeException(e);
+        }
+
     }
 
-    private void makeHttpRequest(String url) {
+    private void makeHttpRequest(String url, String qrcode) throws JSONException {
         RequestQueue queue = Volley.newRequestQueue(this);
-        StringRequest stringRequest = new StringRequest(Request.Method.POST, url,
-                new Response.Listener<String>() {
-                    @Override
-                    public void onResponse(String response) {
-                        responseMessage = response;
-                        responseTextView.setText(response);
-                    }
-                }, new Response.ErrorListener() {
-            @Override
-            public void onErrorResponse(VolleyError error) {
-                Toast.makeText(RequestActivity.this, "Erro na requisição: " + error.getMessage(), Toast.LENGTH_LONG).show();
-            }
-        });
+        JSONObject jsonObject = new JSONObject();
+        jsonObject.put("qrcode", qrcode);
+
+        JsonObjectRequest stringRequest = new JsonObjectRequest(Request.Method.POST, url, jsonObject,
+            new Response.Listener<JSONObject>() {
+                @Override
+                public void onResponse(JSONObject s) {
+                     responseMessage = "1";
+                     responseTextView.setText(responseMessage);
+                     sendAfterRequest();
+                }
+            }, new Response.ErrorListener() {
+                @Override
+                public void onErrorResponse(VolleyError error) {
+                    error.printStackTrace();
+                    responseMessage = "0";
+                    responseTextView.setText(responseMessage);
+                    sendAfterRequest();
+                }
+            });
 
         queue.add(stringRequest);
+
     }
 
     private void sendViaBluetooth(String message) {
@@ -100,9 +105,10 @@ public class RequestActivity extends AppCompatActivity {
         }
 
         BluetoothDevice hc06 = bluetoothAdapter.getRemoteDevice(HC06_ADDRESS);
-        try {
+        try  {
             bluetoothSocket = hc06.createRfcommSocketToServiceRecord(HC06_UUID);
             bluetoothSocket.connect();
+
             outputStream = bluetoothSocket.getOutputStream();
             outputStream.write(message.getBytes());
             Toast.makeText(this, "Mensagem enviada via Bluetooth", Toast.LENGTH_LONG).show();
@@ -119,6 +125,14 @@ public class RequestActivity extends AppCompatActivity {
             } catch (IOException e) {
                 Toast.makeText(this, "Erro ao fechar conexão Bluetooth: " + e.getMessage(), Toast.LENGTH_LONG).show();
             }
+        }
+    }
+
+    private void sendAfterRequest() {
+        if (responseMessage != null) {
+            sendViaBluetooth(responseMessage);
+        } else {
+            Toast.makeText(RequestActivity.this, "Nenhuma resposta para enviar", Toast.LENGTH_LONG).show();
         }
     }
 }
